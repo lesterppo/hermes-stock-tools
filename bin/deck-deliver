@@ -31,18 +31,11 @@ def deliver(input_spec, output_path=None, skip_gen=False):
         print(f"Error: No output file generated", file=sys.stderr)
         return 1
     
-    # Step 2: Inline assets for offline delivery
-    result = subprocess.run(
-        [HTML_INLINE, output_path],
-        capture_output=True, text=True, timeout=15
-    )
-    if result.returncode != 0:
-        print(f"Warning: html-inline failed: {result.stderr}", file=sys.stderr)
-    
-    # Step 3: Report
+    # Step 2: Report (Chart.js + Font Awesome stay as CDN for maximum browser compatibility)
     size = Path(output_path).stat().st_size
     size_str = f"{size/1024:.0f}KB" if size > 1024 else f"{size}B"
-    print(f"✅ {output_path} ({size_str}, fully offline)")
+    print(f"✅ {output_path} ({size_str})")
+    print(f"   Opens in any browser. For offline use: html-inline {output_path}")
     return 0
 
 if __name__ == "__main__":
@@ -52,7 +45,7 @@ if __name__ == "__main__":
     
     if sys.argv[1] == "--from-fin":
         symbol = sys.argv[2]
-        out = sys.argv[3] if len(sys.argv) > 3 else str(Path.home() / "research" / f"{symbol.lower()}-deck.html")
+        out = sys.argv[3] if len(sys.argv) > 3 else f"/home/peter/research/{symbol.lower()}-deck.html"
         result = subprocess.run(
             [DECK_GEN, "--from-fin", symbol, out],
             capture_output=True, text=True, timeout=30
