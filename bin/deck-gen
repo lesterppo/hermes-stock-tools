@@ -106,8 +106,8 @@ def render_exec_summary(spec, data):
     return f"""<div class="slide" data-index="1">
   <div class="slide-title">Executive Summary</div>
   <div class="two-col" style="flex:1">
-    <div class="card"><h3>The Bull Case</h3><p>{h(spec.get('bull',''))}</p>{spec.get('bull_highlight','')}</div>
-    <div class="card"><h3>Key Considerations</h3><p>{h(spec.get('bear',''))}</p><div class="stat-grid" style="margin-top:16px;grid-template-columns:repeat({len(stats)},1fr)">{stat_html}</div></div>
+    <div class="card"><h3>The Bull Case</h3><p>{spec.get('bull','')}</p>{spec.get('bull_highlight','')}</div>
+    <div class="card"><h3>Key Considerations</h3><p>{spec.get('bear','')}</p><div class="stat-grid" style="margin-top:16px;grid-template-columns:repeat({len(stats)},1fr)">{stat_html}</div></div>
   </div>
 </div>"""
 
@@ -117,7 +117,7 @@ def render_company(spec, data):
     return f"""<div class="slide" data-index="2">
   <div class="slide-title">Company Overview</div>
   <div class="two-col" style="flex:1">
-    <div><div class="card" style="margin-bottom:20px"><h3>Corporate Profile</h3><table>{rows}</table></div><div class="card"><h3>What {h(spec.get('symbol',''))} Does</h3><p style="font-size:0.9rem">{h(spec.get('description',''))}</p></div></div>
+    <div><div class="card" style="margin-bottom:20px"><h3>Corporate Profile</h3><table>{rows}</table></div><div class="card"><h3>What {h(spec.get('symbol',''))} Does</h3><p style="font-size:0.9rem">{spec.get('description','')}</p></div></div>
     <div class="card" style="display:flex;flex-direction:column"><h3>Strategic Acquisitions</h3><table><tr><th>Target</th><th>Value</th><th>Strategic Fit</th></tr>{acq_rows}</table>{spec.get('acq_note','')}</div>
   </div>
 </div>"""
@@ -142,7 +142,7 @@ def render_segments(spec, data):
   <div class="slide-title">Business Segments</div>
   <div class="two-col" style="flex:1">
     <div class="card" style="display:flex;flex-direction:column"><h3>Revenue Split</h3><div class="chart-container"><canvas id="{chart_id}" style="display:none"></canvas></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px"><div class="stat-box"><div class="stat-value" style="color:{seg_colors[0]};font-size:1.5rem">{h(str(seg1.get('pct','?')))}%</div><div class="stat-label">{h(seg1.get('name','Segment 1'))}<br>{h(str(stat1_val))}</div></div><div class="stat-box"><div class="stat-value" style="color:{seg_colors[1]};font-size:1.5rem">{h(str(seg2.get('pct','?')))}%</div><div class="stat-label">{h(seg2.get('name','Segment 2'))}<br>{h(str(stat2_val))}</div></div></div></div>
-    <div><div class="card" style="margin-bottom:20px"><h3>{h(seg1.get('name','Segment 1'))}</h3><ul>{''.join(f'<li>{h(item)}</li>' for item in seg1.get('details',[]))}</ul></div><div class="card"><h3>{h(seg2.get('name','Segment 2'))}</h3><ul>{''.join(f'<li>{h(item)}</li>' for item in seg2.get('details',[]))}</ul></div></div>
+    <div><div class="card" style="margin-bottom:20px"><h3>{h(seg1.get('name','Segment 1'))}</h3><ul>{''.join(f'<li>{item}</li>' for item in seg1.get('details',[]))}</ul></div><div class="card"><h3>{h(seg2.get('name','Segment 2'))}</h3><ul>{''.join(f'<li>{item}</li>' for item in seg2.get('details',[]))}</ul></div></div>
   </div>
 </div>""",
         'chart_trigger': chart_trigger,
@@ -168,7 +168,7 @@ def render_revenue(spec, data):
   <div class="slide-title">Revenue Growth</div>
   <div class="stat-grid" style="grid-template-columns:repeat({len(spec.get('stats',[]))},1fr)">{stats}</div>
   <div class="card" style="margin-bottom:20px"><div class="chart-container" style="height:320px"><canvas id="{chart_id}" style="display:none"></canvas></div></div>
-  <div class="highlight"><p>{h(spec.get('highlight',''))}</p></div>
+  <div class="highlight"><p>{spec.get('highlight','')}</p></div>
 </div>""",
         'chart_trigger': chart_trigger,
         'chart_func': chart_func
@@ -207,12 +207,12 @@ def render_margins(spec, data):
 
 def render_balance(spec, data):
     rows = '\n'.join(f'<tr><td style="color:var(--accent)">{h(r[0])}</td><td>{h(str(r[1]))}</td></tr>' for r in spec.get('metrics',[]))
-    items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('items',[]))
+    items = '\n'.join(f'<li>{item}</li>' for item in spec.get('items',[]))
     return f"""<div class="slide" data-index="6">
   <div class="slide-title">Balance Sheet & Capital Allocation</div>
   <div class="two-col" style="flex:1">
     <div><div class="card" style="margin-bottom:20px"><h3>Financial Position</h3><table>{rows}</table></div><div class="card"><h3>Capital Allocation</h3><ul>{items}</ul></div></div>
-    <div class="card"><p>{h(spec.get('narrative',''))}</p>{spec.get('highlight','')}{spec.get('extra','')}</div>
+    <div class="card"><p>{spec.get('narrative','')}</p>{spec.get('highlight','')}{spec.get('extra','')}</div>
   </div>
 </div>"""
 
@@ -246,11 +246,11 @@ def render_analysts(spec, data):
 
 def render_industry(spec, data):
     c_rows = '\n'.join(f'<tr>{("<td style=\"color:var(--accent)\"><strong>"+h(r[0])+"</strong></td>") if i==0 else ""}<td>{h(r[1])}</td><td>{h(str(r[2]))}</td><td>{h(r[3])}</td></tr>' for i,r in enumerate(spec.get('competitors',[])))
-    items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('moat_points',[]))
+    items = '\n'.join(f'<li>{item}</li>' for item in spec.get('moat_points',[]))
     return f"""<div class="slide" data-index="9">
   <div class="slide-title">Industry & Competitive Moat</div>
   <div class="two-col" style="flex:1">
-    <div><div class="card" style="margin-bottom:20px"><h3>{h(spec.get('market_title',''))}</h3><div style="font-size:2rem;color:var(--accent);font-weight:800;margin-bottom:4px">{h(spec.get('market_position',''))}</div><div style="color:var(--text-secondary)">{h(spec.get('market_detail',''))}</div><p style="margin-top:12px">{h(spec.get('market_note',''))}</p></div><div class="card"><h3>{h(spec.get('moat_title',''))}</h3><ul>{items}</ul></div></div>
+    <div><div class="card" style="margin-bottom:20px"><h3>{h(spec.get('market_title',''))}</h3><div style="font-size:2rem;color:var(--accent);font-weight:800;margin-bottom:4px">{h(spec.get('market_position',''))}</div><div style="color:var(--text-secondary)">{spec.get('market_detail','')}</div><p style="margin-top:12px">{spec.get('market_note','')}</p></div><div class="card"><h3>{h(spec.get('moat_title',''))}</h3><ul>{items}</ul></div></div>
     <div class="card"><h3>Key Competitors</h3><table><tr><th>Competitor</th><th>HQ</th><th>Est. Revenue</th><th>Focus</th></tr>{c_rows}</table>{spec.get('competitor_note','')}</div>
   </div>
 </div>"""
@@ -260,7 +260,7 @@ def render_catalyst(spec, data):
         f'<div class="stat-box"><div class="stat-value" style="color:{s.get("color","var(--accent)")};font-size:1.3rem">{h(str(s["value"]))}</div><div class="stat-label">{h(s["label"])}</div></div>'
         for s in spec.get('stats',[])
     )
-    items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('points',[]))
+    items = '\n'.join(f'<li>{item}</li>' for item in spec.get('points',[]))
     rows = '\n'.join(f'<tr><td>{h(r[0])}</td><td>{h(str(r[1]))}</td><td>{h(r[2])}</td></tr>' for r in spec.get('timeline',[]))
     
     return f"""<div class="slide" data-index="10">
@@ -273,7 +273,7 @@ def render_catalyst(spec, data):
 </div>"""
 
 def render_catalyst2(spec, data):
-    parts = ''.join(f'<div class="card" style="margin-bottom:20px"><h3>{h(c.get("title",""))}</h3><ul>{"".join(f"<li>{h(item)}</li>" for item in c.get("points",[]))}</ul></div>' for c in spec.get('columns',[]))
+    parts = ''.join(f'<div class="card" style="margin-bottom:20px"><h3>{h(c.get("title",""))}</h3><ul>{"".join(f"<li>{item}</li>" for item in c.get("points",[]))}</ul></div>' for c in spec.get('columns',[]))
     return f"""<div class="slide" data-index="11">
   <div class="slide-title">{h(spec.get('title','Growth Catalyst'))}</div>
   <div class="two-col" style="flex:1">
@@ -283,7 +283,7 @@ def render_catalyst2(spec, data):
 </div>"""
 
 def render_risks(spec, data):
-    cards = ''.join(f'<div class="card"><h3 style="color:var(--red)">{h(r.get("title",""))}</h3><ul>{"".join(f"<li>{h(item)}</li>" for item in r.get("points",[]))}</ul></div>' for r in spec.get('risk_cards',[]))
+    cards = ''.join(f'<div class="card"><h3 style="color:var(--red)">{h(r.get("title",""))}</h3><ul>{"".join(f"<li>{item}</li>" for item in r.get("points",[]))}</ul></div>' for r in spec.get('risk_cards',[]))
     return f"""<div class="slide" data-index="12">
   <div class="slide-title">Risk Factors & Watch Items</div>
   <div class="three-col" style="flex:1">{cards}</div>
@@ -291,8 +291,8 @@ def render_risks(spec, data):
 </div>"""
 
 def render_thesis(spec, data):
-    bull_items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('bull_points',[]))
-    bear_items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('bear_points',[]))
+    bull_items = '\n'.join(f'<li>{item}</li>' for item in spec.get('bull_points',[]))
+    bear_items = '\n'.join(f'<li>{item}</li>' for item in spec.get('bear_points',[]))
     return f"""<div class="slide" data-index="13">
   <div class="slide-title">Investment Thesis & Outlook</div>
   <div class="bull-bear" style="flex:1">
