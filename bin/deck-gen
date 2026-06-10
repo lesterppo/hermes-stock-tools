@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+"""deck-gen — Generate professional stock research HTML slide decks from JSON specs.
+Usage:
+  deck-gen spec.json output.html          # Generate from spec file
+  deck-gen --from-fin KEYS output.html    # Auto-generate from fin data + inline research
+  deck-gen --template > blank-spec.json   # Print template spec
+
+Spec format: see --template output.
+Integrates with `fin json` and `fin chart` for auto-populated charts.
+Automatically inlines Chart.js + Font Awesome for offline delivery.
+"""
+
+import json, sys, os
+from pathlib import Path
+from datetime import datetime
+
+DARK_THEME_CSS = """:root{--bg:#0a0f1e;--card-bg:#111827;--card-border:#1e293b;--accent:#38bdf8;--accent2:#818cf8;--green:#34d399;--red:#f87171;--yellow:#fbbf24;--text:#e2e8f0;--text-secondary:#94a3b8;--gradient:linear-gradient(135deg,#0a0f1e 0%,#1e1b4b 50%,#0a0f1e 100%)}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:16px;line-height:1.5}
+.presentation{height:calc(100% - 60px);position:relative;overflow:hidden}
+.slide{position:absolute;top:0;left:0;width:100%;height:100%;display:none;flex-direction:column;padding:48px 64px;background:var(--gradient);overflow-y:auto}
+.slide.active{display:flex}
+.slide-title{font-size:2.2rem;font-weight:700;margin-bottom:32px;color:#fff;border-bottom:3px solid var(--accent);padding-bottom:12px;display:inline-block}
+.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:24px}
+.card h3{font-size:1.15rem;color:var(--accent);margin-bottom:12px}
+.card p,.card li{font-size:0.95rem;color:var(--text-secondary);line-height:1.6}
+.card ul{padding-left:20px}.card li{margin-bottom:6px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px}
+.stat-box{background:var(--card-bg);border:1px solid var(--card-border);border-radius:10px;padding:20px;text-align:center}
+.stat-value{font-size:2rem;font-weight:800;color:var(--accent);line-height:1.1}
+.stat-label{font-size:0.82rem;color:var(--text-secondary);margin-top:6px}
+.stat-change{font-size:0.85rem;margin-top:4px}
+.stat-change.up{color:var(--green)}.stat-change.down{color:var(--red)}
+.chart-container{position:relative;height:280px;margin-top:8px}
+.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78rem;font-weight:600}
+.badge-green{background:rgba(52,211,153,0.15);color:var(--green)}
+.badge-red{background:rgba(248,113,113,0.15);color:var(--red)}
+.badge-blue{background:rgba(56,189,248,0.15);color:var(--accent)}
+.badge-purple{background:rgba(129,140,248,0.15);color:var(--accent2)}
+.highlight{background:rgba(56,189,248,0.08);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 8px 8px 0;margin:12px 0}
+.highlight p{color:var(--text);font-size:0.95rem}
+table{width:100%;border-collapse:collapse;font-size:0.9rem;margin-top:12px}
+th{text-align:left;color:var(--accent);padding:8px 12px;border-bottom:2px solid var(--card-border);font-size:0.82rem;text-transform:uppercase}
+td{padding:10px 12px;border-bottom:1px solid var(--card-border);color:var(--text-secondary)}
+tr:hover td{background:rgba(56,189,248,0.04);color:var(--text)}
+.title-slide{justify-content:center;align-items:center;text-align:center}
+.title-slide h1{font-size:3.2rem;font-weight:800;color:#fff;margin-bottom:12px;line-height:1.2}
+.title-slide .ticker{font-size:5rem;font-weight:900;color:var(--accent);margin-bottom:4px}
+.title-slide .sub{font-size:1.3rem;color:var(--text-secondary)}
+.title-slide .meta{font-size:0.95rem;color:var(--text-secondary);margin-top:32px;opacity:0.7}
+.nav-bar{height:60px;background:#0d1321;border-top:1px solid var(--card-border);display:flex;align-items:center;justify-content:center;gap:20px;padding:0 24px}
+.nav-bar button{background:var(--card-bg);border:1px solid var(--card-border);color:var(--text);padding:8px 18px;border-radius:8px;cursor:pointer;font-size:0.9rem;transition:all 0.2s}
+.nav-bar button:hover{background:#1e293b;border-color:var(--accent)}
+.progress-dots{display:flex;gap:8px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--card-border);border:none;cursor:pointer;padding:0;transition:all 0.2s}
+.dot.active{width:10px;height:10px;background:var(--accent)}
+.counter{font-size:0.85rem;color:var(--text-secondary);min-width:90px;text-align:center}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+.bull-bear{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.bull-card{background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);border-radius:12px;padding:24px}
+.bull-card h3{color:var(--green)}
+.bear-card{background:rgba(248,113,113,0.06);border:1px solid rgba(248,113,113,0.2);border-radius:12px;padding:24px}
+.bear-card h3{color:var(--red)}
+@media print{@page{size:landscape;margin:0.5in}html,body{overflow:visible;background:#fff}.slide{position:relative;display:flex!important;page-break-after:always;break-inside:avoid;min-height:7in}.nav-bar{display:none!important}.card,.stat-box,.chart-container,.highlight{box-shadow:none;border:1px solid #cbd5e1;print-color-adjust:exact;-webkit-print-color-adjust:exact}.title-slide{background:#0a1628!important;color:#fff!important}}"""
+
+JS_NAV = """<script>
+var cs=0,ts=__SLIDE_COUNT__,els=null,ctr=null,pd=null,ci={};
+function goTo(n){els[cs].classList.remove('active');cs=n;els[cs].classList.add('active');if(ctr)ctr.textContent='Slide '+(cs+1)+' / '+ts;updateDots();renderCharts(cs);}
+window.prevSlide=function(){goTo((cs-1+ts)%ts);};window.nextSlide=function(){goTo((cs+1)%ts);};
+function buildDots(){pd=document.getElementById('progressDots');pd.innerHTML='';for(var i=0;i<ts;i++){var d=document.createElement('button');d.className='dot'+(i===0?' active':'');d.setAttribute('aria-label','Go to slide '+(i+1));d.onclick=(function(idx){return function(){goTo(idx);};})(i);pd.appendChild(d);}}
+function updateDots(){var dots=pd.querySelectorAll('.dot');for(var i=0;i<dots.length;i++)dots[i].className='dot'+(i===cs?' active':'');}
+document.addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '){e.preventDefault();window.nextSlide();}else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();window.prevSlide();}});
+var tx=0;document.addEventListener('touchstart',function(e){tx=e.changedTouches[0].screenX;},{passive:true});document.addEventListener('touchend',function(e){var dx=e.changedTouches[0].screenX-tx;if(Math.abs(dx)>50){if(dx<0)window.nextSlide();else window.prevSlide();}},{passive:true});
+function renderCharts(si){__CHART_TRIGGERS__}
+function tryDraw(key,cid,fn){if(ci[key]){try{ci[key].resize();}catch(e){}return;}if(typeof Chart==='undefined')return;var c=document.getElementById(cid);if(!c)return;c.style.display='block';try{ci[key]=fn(c);}catch(e){console.error('Chart render failed:',e);}}
+__CHART_FUNCTIONS__
+function init(){els=document.querySelectorAll('.slide');ctr=document.getElementById('slideCounter');buildDots();}
+if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',init);}else{init();}
+</script>"""
+
+def h(s): return s.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
+
+def render_title(spec, data):
+    d = data or {}
+    sym = spec.get('symbol','N/A')
+    name = spec.get('name', d.get('longName',''))
+    price = spec.get('price', d.get('currentPrice','---'))
+    mcap = spec.get('market_cap', '')
+    if not mcap and d.get('marketCap'):
+        mc = d['marketCap']
+        mcap = f"${mc/1e9:.1f}B" if mc else ''
+    meta_parts = [f"Price: ${price:.2f}" if isinstance(price,(int,float)) else f"Price: {price}"]
+    if mcap: meta_parts.append(f"Market Cap: {mcap}")
+    meta_parts.append(spec.get('meta',''))
+
+    return f"""<div class="slide active title-slide" data-index="0">
+  <div class="ticker">{h(sym)}</div>
+  <h1>{h(name)}</h1>
+  <div class="sub">{h(spec.get('subtitle','Comprehensive Investment Research & Deep Dive'))}</div>
+  <div class="meta">{h(spec.get('date',datetime.now().strftime('%B %d, %Y')))} &nbsp;|&nbsp; {' &nbsp;|&nbsp; '.join(meta_parts)}</div>
+</div>"""
+
+def render_exec_summary(spec, data):
+    stats = spec.get('stats',[])
+    stat_html = '\n'.join(f'<div class="stat-box"><div class="stat-value" style="color:{s.get("color","var(--accent)")}">{h(str(s["value"]))}</div><div class="stat-label">{h(s["label"])}</div></div>' for s in stats)
+    return f"""<div class="slide" data-index="1">
+  <div class="slide-title">Executive Summary</div>
+  <div class="two-col" style="flex:1">
+    <div class="card"><h3>The Bull Case</h3><p>{h(spec.get('bull',''))}</p>{spec.get('bull_highlight','')}</div>
+    <div class="card"><h3>Key Considerations</h3><p>{h(spec.get('bear',''))}</p><div class="stat-grid" style="margin-top:16px;grid-template-columns:repeat({len(stats)},1fr)">{stat_html}</div></div>
+  </div>
+</div>"""
+
+def render_company(spec, data):
+    rows = '\n'.join(f'<tr><td style="color:var(--accent);width:140px">{h(r[0])}</td><td>{h(str(r[1]))}</td></tr>' for r in spec.get('profile',[]))
+    acq_rows = '\n'.join(f'<tr><td>{h(a[0])}</td><td>{h(str(a[1]))}</td><td>{h(a[2])}</td></tr>' for a in spec.get('acquisitions',[]))
+    return f"""<div class="slide" data-index="2">
+  <div class="slide-title">Company Overview</div>
+  <div class="two-col" style="flex:1">
+    <div><div class="card" style="margin-bottom:20px"><h3>Corporate Profile</h3><table>{rows}</table></div><div class="card"><h3>What {h(spec.get('symbol',''))} Does</h3><p style="font-size:0.9rem">{h(spec.get('description',''))}</p></div></div>
+    <div class="card" style="display:flex;flex-direction:column"><h3>Strategic Acquisitions</h3><table><tr><th>Target</th><th>Value</th><th>Strategic Fit</th></tr>{acq_rows}</table>{spec.get('acq_note','')}</div>
+  </div>
+</div>"""
+
+def render_segments(spec, data):
+    seg_data = spec.get('chart',[50,50])
+    seg_labels = spec.get('chart_labels',['Segment A','Segment B'])
+    seg_colors = spec.get('chart_colors',['#38bdf8','#818cf8'])
+    seg1 = spec.get('segment1',{})
+    seg2 = spec.get('segment2',{})
+    chart_id = 'chartSegments'
+    chart_fn = f'c{chart_id}'
+    
+    stat1_val = seg1.get('value','')
+    stat2_val = seg2.get('value','')
+    
+    chart_trigger = f"if(si===3)tryDraw('seg','{chart_id}',{chart_fn});"
+    chart_func = f"function {chart_fn}(c){{return new Chart(c,{{type:'doughnut',data:{{labels:{json.dumps(seg_labels)},datasets:[{{data:{json.dumps(seg_data)},backgroundColor:{json.dumps(seg_colors)},borderColor:'#111827',borderWidth:3}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{position:'bottom',labels:{{color:'#94a3b8',padding:16,font:{{size:13}}}}}}}}}}}})}}}}}}"
+    
+    return {
+        'html': f"""<div class="slide" data-index="3">
+  <div class="slide-title">Business Segments</div>
+  <div class="two-col" style="flex:1">
+    <div class="card" style="display:flex;flex-direction:column"><h3>Revenue Split</h3><div class="chart-container"><canvas id="{chart_id}" style="display:none"></canvas></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px"><div class="stat-box"><div class="stat-value" style="color:{seg_colors[0]};font-size:1.5rem">{h(str(seg1.get('pct','?')))}%</div><div class="stat-label">{h(seg1.get('name','Segment 1'))}<br>{h(str(stat1_val))}</div></div><div class="stat-box"><div class="stat-value" style="color:{seg_colors[1]};font-size:1.5rem">{h(str(seg2.get('pct','?')))}%</div><div class="stat-label">{h(seg2.get('name','Segment 2'))}<br>{h(str(stat2_val))}</div></div></div></div>
+    <div><div class="card" style="margin-bottom:20px"><h3>{h(seg1.get('name','Segment 1'))}</h3><ul>{''.join(f'<li>{h(item)}</li>' for item in seg1.get('details',[]))}</ul></div><div class="card"><h3>{h(seg2.get('name','Segment 2'))}</h3><ul>{''.join(f'<li>{h(item)}</li>' for item in seg2.get('details',[]))}</ul></div></div>
+  </div>
+</div>""",
+        'chart_trigger': chart_trigger,
+        'chart_func': chart_func
+    }
+
+def render_revenue(spec, data):
+    chart_data = spec.get('chart_data', {})
+    labels = json.dumps(chart_data.get('labels',[]))
+    values = json.dumps(chart_data.get('data',[]))
+    unit = chart_data.get('unit','B')
+    stats = '\n'.join(f'<div class="stat-box"><div class="stat-value" style="color:{s.get("color","var(--accent)")}">{h(str(s["value"]))}</div><div class="stat-label">{h(s["label"])}</div>{("<div class=\"stat-change "+s.get("change_dir","")+"\">"+h(str(s.get("change","")))+"</div>") if s.get("change") else ""}</div>' for s in spec.get('stats',[]))
+    
+    chart_id = 'chartRevenue'
+    chart_fn = f'c{chart_id}'
+    bg_colors = json.dumps(chart_data.get('colors',['rgba(56,189,248,0.5)' for _ in chart_data.get('data',[])]))
+    
+    chart_trigger = f"if(si===4)tryDraw('rev','{chart_id}',{chart_fn});"
+    chart_func = f"function {chart_fn}(c){{return new Chart(c,{{type:'bar',data:{{labels:{labels},datasets:[{{label:'Revenue (${unit})',data:{values},backgroundColor:{bg_colors},borderColor:'#38bdf8',borderWidth:1,borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{grid:{{color:'rgba(148,163,184,0.1)'}},ticks:{{color:'#94a3b8',callback:function(v){{return '$'+v+'{unit}'}}}}}},x:{{ticks:{{color:'#94a3b8'}}}}}}}});}}"
+    
+    return {
+        'html': f"""<div class="slide" data-index="4">
+  <div class="slide-title">Revenue Growth</div>
+  <div class="stat-grid" style="grid-template-columns:repeat({len(spec.get('stats',[]))},1fr)">{stats}</div>
+  <div class="card" style="margin-bottom:20px"><div class="chart-container" style="height:320px"><canvas id="{chart_id}" style="display:none"></canvas></div></div>
+  <div class="highlight"><p>{h(spec.get('highlight',''))}</p></div>
+</div>""",
+        'chart_trigger': chart_trigger,
+        'chart_func': chart_func
+    }
+
+def render_margins(spec, data):
+    eps_data = spec.get('eps_chart',{})
+    labels = json.dumps(eps_data.get('labels',[]))
+    values = json.dumps(eps_data.get('data',[]))
+    
+    def _metric_row(r):
+        base = f'<tr><td style="color:var(--accent)">{h(r[0])}</td><td>{h(str(r[1]))}'
+        if len(r) > 2:
+            base += f' <span class="badge badge-green">{h(r[2])}</span>'
+        return base + '</td></tr>'
+    rows = '\n'.join(_metric_row(r) for r in spec.get('metrics',[]))
+    
+    chart_id = 'chartEPS'
+    chart_fn = f'c{chart_id}'
+    bg_colors = json.dumps(eps_data.get('colors',['rgba(56,189,248,0.6)' for _ in eps_data.get('data',[])]))
+    
+    chart_trigger = f"if(si===5)tryDraw('eps','{chart_id}',{chart_fn});"
+    chart_func = f"function {chart_fn}(c){{return new Chart(c,{{type:'bar',data:{{labels:{labels},datasets:[{{label:'EPS',data:{values},backgroundColor:{bg_colors},borderColor:'#38bdf8',borderWidth:1,borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{grid:{{color:'rgba(148,163,184,0.1)'}},ticks:{{color:'#94a3b8',callback:function(v){{return '$'+v}}}}}},x:{{ticks:{{color:'#94a3b8'}}}}}}}});}}"
+    
+    return {
+        'html': f"""<div class="slide" data-index="5">
+  <div class="slide-title">Margin Expansion & Earnings Power</div>
+  <div class="two-col" style="flex:1">
+    <div class="card" style="display:flex;flex-direction:column"><h3>EPS Trajectory</h3><div class="chart-container"><canvas id="{chart_id}" style="display:none"></canvas></div></div>
+    <div><div class="card" style="margin-bottom:20px"><h3>Profitability Metrics</h3><table>{rows}</table></div>{spec.get('extra_card','')}</div>
+  </div>
+</div>""",
+        'chart_trigger': chart_trigger,
+        'chart_func': chart_func
+    }
+
+def render_balance(spec, data):
+    rows = '\n'.join(f'<tr><td style="color:var(--accent)">{h(r[0])}</td><td>{h(str(r[1]))}</td></tr>' for r in spec.get('metrics',[]))
+    items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('items',[]))
+    return f"""<div class="slide" data-index="6">
+  <div class="slide-title">Balance Sheet & Capital Allocation</div>
+  <div class="two-col" style="flex:1">
+    <div><div class="card" style="margin-bottom:20px"><h3>Financial Position</h3><table>{rows}</table></div><div class="card"><h3>Capital Allocation</h3><ul>{items}</ul></div></div>
+    <div class="card"><p>{h(spec.get('narrative',''))}</p>{spec.get('highlight','')}{spec.get('extra','')}</div>
+  </div>
+</div>"""
+
+def render_stock(spec, data):
+    def _val_row(r):
+        base = f'<tr><td style="color:var(--accent)">{h(r[0])}</td><td>{h(str(r[1]))}'
+        if len(r) > 2:
+            base += f' <span class="badge badge-green">{h(r[2])}</span>'
+        return base + '</td></tr>'
+    v_rows = '\n'.join(_val_row(r) for r in spec.get('valuation',[]))
+    h_rows = '\n'.join(f'<tr><td>{h(r[0])}</td><td>{h(str(r[1]))}</td></tr>' for r in spec.get('holders',[]))
+    stats_html = '\n'.join(f'<div class="stat-box"><div class="stat-value" style="color:{s.get("color","var(--accent)")}">{h(str(s["value"]))}</div><div class="stat-label">{h(s["label"])}</div></div>' for s in spec.get('stats',[]))
+    return f"""<div class="slide" data-index="7">
+  <div class="slide-title">Stock Performance & Valuation</div>
+  <div class="stat-grid" style="grid-template-columns:repeat({len(spec.get('stats',[]))},1fr)">{stats_html}</div>
+  <div class="two-col" style="flex:1;margin-top:16px">
+    <div class="card" style="display:flex;flex-direction:column"><h3>Valuation Metrics</h3><table>{v_rows}</table></div>
+    <div class="card"><h3>Institutional Backing</h3><div style="font-size:2.5rem;color:var(--accent);font-weight:900;margin-bottom:4px">{h(str(spec.get('inst_ownership','')))}</div><div style="color:var(--text-secondary);margin-bottom:16px">Institutional Ownership</div><table><tr><th>Top Holders</th><th>% Owned</th></tr>{h_rows}</table>{spec.get('note','')}</div>
+  </div>
+</div>"""
+
+def render_analysts(spec, data):
+    p_rows = '\n'.join(f'<tr><td style="color:var(--accent)">{h(r[0])}</td><td>{h(str(r[1]))}</td></tr>' for r in spec.get('peer_rows',[]))
+    return f"""<div class="slide" data-index="8">
+  <div class="slide-title">Analyst Coverage & Peer Comparison</div>
+  <div class="two-col" style="flex:1">
+    <div><div class="card" style="margin-bottom:20px;text-align:center"><h3>Consensus</h3><div style="font-size:3rem;color:var(--accent);font-weight:900">{h(str(spec.get('target','')))}</div><div style="color:var(--text-secondary)">{h(spec.get('target_desc',''))}</div><div style="margin-top:12px"><span class="badge badge-green" style="font-size:0.95rem;padding:6px 16px">{h(str(spec.get('analyst_info','')))}</span></div></div>{spec.get('extra_left','')}</div>
+    <div class="card"><h3>Peer Comparison</h3><table><tr><th>Ticker</th><th>Company</th><th>Trail P/E</th><th>Fwd P/E</th><th>PEG</th></tr>{p_rows}</table>{spec.get('peer_note','')}</div>
+  </div>
+</div>"""
+
+def render_industry(spec, data):
+    c_rows = '\n'.join(f'<tr>{("<td style=\"color:var(--accent)\"><strong>"+h(r[0])+"</strong></td>") if i==0 else ""}<td>{h(r[1])}</td><td>{h(str(r[2]))}</td><td>{h(r[3])}</td></tr>' for i,r in enumerate(spec.get('competitors',[])))
+    items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('moat_points',[]))
+    return f"""<div class="slide" data-index="9">
+  <div class="slide-title">Industry & Competitive Moat</div>
+  <div class="two-col" style="flex:1">
+    <div><div class="card" style="margin-bottom:20px"><h3>{h(spec.get('market_title',''))}</h3><div style="font-size:2rem;color:var(--accent);font-weight:800;margin-bottom:4px">{h(spec.get('market_position',''))}</div><div style="color:var(--text-secondary)">{h(spec.get('market_detail',''))}</div><p style="margin-top:12px">{h(spec.get('market_note',''))}</p></div><div class="card"><h3>{h(spec.get('moat_title',''))}</h3><ul>{items}</ul></div></div>
+    <div class="card"><h3>Key Competitors</h3><table><tr><th>Competitor</th><th>HQ</th><th>Est. Revenue</th><th>Focus</th></tr>{c_rows}</table>{spec.get('competitor_note','')}</div>
+  </div>
+</div>"""
+
+def render_catalyst(spec, data):
+    stats_html = '\n'.join(
+        f'<div class="stat-box"><div class="stat-value" style="color:{s.get("color","var(--accent)")};font-size:1.3rem">{h(str(s["value"]))}</div><div class="stat-label">{h(s["label"])}</div></div>'
+        for s in spec.get('stats',[])
+    )
+    items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('points',[]))
+    rows = '\n'.join(f'<tr><td>{h(r[0])}</td><td>{h(str(r[1]))}</td><td>{h(r[2])}</td></tr>' for r in spec.get('timeline',[]))
+    
+    return f"""<div class="slide" data-index="10">
+  <div class="slide-title">Growth Catalyst: {h(spec.get('catalyst_name',''))}</div>
+  <div class="stat-grid" style="grid-template-columns:repeat({len(spec.get('stats',[]))},1fr)">{stats_html}</div>
+  <div class="two-col" style="flex:1">
+    <div class="card"><h3>Why {h(spec.get('symbol',''))} Wins</h3><ul>{items}</ul></div>
+    <div><div class="card" style="margin-bottom:16px"><h3>Demand Trajectory</h3><table><tr><th>Period</th><th>Performance</th><th>Context</th></tr>{rows}</table></div>{spec.get('risk_note','')}</div>
+  </div>
+</div>"""
+
+def render_catalyst2(spec, data):
+    parts = ''.join(f'<div class="card" style="margin-bottom:20px"><h3>{h(c.get("title",""))}</h3><ul>{"".join(f"<li>{h(item)}</li>" for item in c.get("points",[]))}</ul></div>' for c in spec.get('columns',[]))
+    return f"""<div class="slide" data-index="11">
+  <div class="slide-title">{h(spec.get('title','Growth Catalyst'))}</div>
+  <div class="two-col" style="flex:1">
+    <div>{parts[:len(parts)//2] if len(spec.get('columns',[]))>2 else parts}</div>
+    <div>{parts[len(parts)//2:] if len(spec.get('columns',[]))>2 else ''}</div>
+  </div>
+</div>"""
+
+def render_risks(spec, data):
+    cards = ''.join(f'<div class="card"><h3 style="color:var(--red)">{h(r.get("title",""))}</h3><ul>{"".join(f"<li>{h(item)}</li>" for item in r.get("points",[]))}</ul></div>' for r in spec.get('risk_cards',[]))
+    return f"""<div class="slide" data-index="12">
+  <div class="slide-title">Risk Factors & Watch Items</div>
+  <div class="three-col" style="flex:1">{cards}</div>
+  {spec.get('footer','')}
+</div>"""
+
+def render_thesis(spec, data):
+    bull_items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('bull_points',[]))
+    bear_items = '\n'.join(f'<li>{h(item)}</li>' for item in spec.get('bear_points',[]))
+    return f"""<div class="slide" data-index="13">
+  <div class="slide-title">Investment Thesis & Outlook</div>
+  <div class="bull-bear" style="flex:1">
+    <div class="bull-card"><h3>The Bull Case</h3><ul style="margin-top:12px">{bull_items}</ul></div>
+    <div class="bear-card"><h3>The Bear Case</h3><ul style="margin-top:12px">{bear_items}</ul></div>
+  </div>
+  {spec.get('bottom_line','')}
+</div>"""
+
+RENDERERS = {
+    'title': render_title,
+    'exec-summary': render_exec_summary,
+    'company': render_company,
+    'segments': render_segments,
+    'revenue': render_revenue,
+    'margins': render_margins,
+    'balance': render_balance,
+    'stock': render_stock,
+    'analysts': render_analysts,
+    'industry': render_industry,
+    'catalyst': render_catalyst,
+    'catalyst2': render_catalyst2,
+    'risks': render_risks,
+    'thesis': render_thesis,
+}
+
+def generate(spec):
+    data = spec.get('data',{})
+    slides_html = []
+    chart_triggers = []
+    chart_functions = []
+    
+    for slide in spec.get('slides',[]):
+        stype = slide.get('type','')
+        renderer = RENDERERS.get(stype)
+        if not renderer:
+            continue
+        
+        result = renderer(slide, data)
+        if isinstance(result, dict):
+            slides_html.append(result['html'])
+            if result.get('chart_trigger'):
+                chart_triggers.append(result['chart_trigger'])
+            if result.get('chart_func'):
+                chart_functions.append(result['chart_func'])
+        else:
+            slides_html.append(result)
+    
+    slide_count = len(slides_html)
+    nav_js = JS_NAV.replace('__SLIDE_COUNT__', str(slide_count))
+    nav_js = nav_js.replace('__CHART_TRIGGERS__', '\n  '.join(chart_triggers))
+    nav_js = nav_js.replace('__CHART_FUNCTIONS__', '\n'.join(chart_functions))
+    
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{h(spec.get('title',spec.get('symbol','Stock')+' — Deep Dive Investment Research'))}</title>
+<style>{DARK_THEME_CSS}</style>
+</head>
+<body>
+<div class="presentation">
+{chr(10).join(slides_html)}
+</div>
+<div class="nav-bar">
+  <button onclick="prevSlide()">Previous</button>
+  <div class="progress-dots" id="progressDots"></div>
+  <span class="counter" id="slideCounter">Slide 1 / {slide_count}</span>
+  <button onclick="nextSlide()">Next</button>
+</div>
+{nav_js}
+</body>
+</html>"""
+
+def print_template():
+    print(json.dumps({
+        "symbol": "AAPL",
+        "title": "Apple Inc. — Deep Dive Investment Research",
+        "data": {},  # paste `fin AAPL json` output here
+        "slides": [
+            {"type": "title", "symbol": "AAPL", "name": "Apple Inc.", "price": 200.00, "market_cap": "$3.2T", "meta": "Forward P/E: 30x | FY2026 Revenue: ~$420B", "subtitle": "Comprehensive Investment Research & Deep Dive", "date": "June 2026"},
+            {"type": "exec-summary", "bull": "Bull case text here...", "bear": "Key risks...", "stats": [{"value": "$3.2T", "label": "Market Cap"}, {"value": "+15%", "label": "Rev Growth"}, {"value": "$250", "label": "Target"}], "bull_highlight": "<div class=\"highlight\"><p><strong>Key Catalysts:</strong> Point 1, Point 2</p></div>"},
+            {"type": "company", "symbol": "AAPL", "description": "What the company does...", "profile": [["Founded", "1976"], ["HQ", "Cupertino, CA"]], "acquisitions": [["Target", "$Value", "Strategic Fit"]], "acq_note": "<div class=\"highlight\"><p>Strategy note here.</p></div>"},
+            {"type": "segments", "chart": [70, 30], "chart_labels": ["Products", "Services"], "chart_colors": ["#38bdf8", "#818cf8"], "segment1": {"pct": 70, "name": "Products", "value": "$280B", "details": ["Detail 1", "Detail 2"]}, "segment2": {"pct": 30, "name": "Services", "value": "$120B", "details": ["Detail 1", "Detail 2"]}},
+            {"type": "revenue", "chart_data": {"labels": ["FY2023","FY2024","FY2025","FY2026E"], "data": [383, 391, 395, 420], "unit": "B", "colors": ["rgba(148,163,184,0.4)","rgba(56,189,248,0.5)","rgba(56,189,248,0.6)","rgba(52,211,153,0.7)"]}, "stats": [{"value": "$383B", "label": "FY2023", "color": "var(--text)", "change": "-3%", "change_dir": "down"}, {"value": "$420B", "label": "FY2026E", "color": "var(--green)", "change": "+6%", "change_dir": "up"}], "highlight": "Record quarter text..."},
+            {"type": "margins", "eps_chart": {"labels": ["FY2023","FY2024","FY2025","FY2026E"], "data": [6.13, 6.43, 7.00, 7.80]}, "metrics": [["Gross Margin", "46%", "+200bp YoY"], ["Op Margin", "30%"]], "extra_card": "<div class=\"card\"><h3>Target</h3>Content</div>"},
+            {"type": "balance", "metrics": [["Cash", "$60B"], ["Debt", "$100B"]], "items": ["Buyback: $90B authorized", "Dividend: 0.5% yield"], "narrative": "Narrative text...", "highlight": "<div class=\"highlight\"><p>Key point.</p></div>"},
+            {"type": "stock", "stats": [{"value": "$200", "label": "Price"}, {"value": "$3.2T", "label": "MCap"}], "valuation": [["Trailing P/E", "35x"], ["Forward P/E", "30x"]], "inst_ownership": "60%", "holders": [["Vanguard", "8%"], ["BlackRock", "7%"]]},
+            {"type": "analysts", "target": "$250", "target_desc": "Average Target (+25% upside)", "analyst_info": "30 Analysts | Range: $200–$300", "peer_rows": [["AAPL","Apple","35x","30x","2.5"], ["MSFT","Microsoft","38x","32x","2.0"]], "peer_note": "<div class=\"highlight\"><p>Peer analysis note.</p></div>"},
+            {"type": "industry", "market_title": "Global Smartphone Market: $500B", "market_position": "#1", "market_detail": "Growing 5% CAGR", "market_note": "Industry text...", "moat_title": "Wide Moat (Morningstar)", "moat_points": ["Point 1", "Point 2"], "competitors": [["Apple","USA","$400B","Full"], ["Samsung","KR","$200B","Electronics"]], "competitor_note": "<div class=\"highlight\"><p>Competitive note.</p></div>"},
+            {"type": "catalyst", "catalyst_name": "AI & Services", "symbol": "AAPL", "stats": [{"value": "$100B", "label": "Services Rev", "color": "var(--accent2)"}, {"value": "+20%", "label": "Growth", "color": "var(--green)"}], "points": ["Point 1", "Point 2"], "timeline": [["FY2023","$78B","Early"], ["FY2025","$100B","Accelerating"]], "risk_note": "<div class=\"highlight\"><p>Key risk note.</p></div>"},
+            {"type": "catalyst2", "title": "Additional Growth Drivers", "columns": [{"title": "Title 1", "points": ["Point 1", "Point 2"]}, {"title": "Title 2", "points": ["Point 1", "Point 2"]}]},
+            {"type": "risks", "risk_cards": [{"title": "Risk 1", "points": ["Point 1", "Point 2"]}, {"title": "Risk 2", "points": ["Point 1"]}], "footer": "<div class=\"highlight\"><p>Risk dashboard summary.</p></div>"},
+            {"type": "thesis", "bull_points": ["Bull point 1", "Bull point 2"], "bear_points": ["Bear point 1", "Bear point 2"], "bottom_line": "<div class=\"highlight\"><p>Bottom line verdict.</p></div>"}
+        ]
+    }, indent=2))
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+    
+    if sys.argv[1] == "--template":
+        print_template()
+        sys.exit(0)
+    
+    if sys.argv[1] == "--from-fin":
+        # Auto-generate from fin data
+        symbol = sys.argv[2]
+        output = sys.argv[3] if len(sys.argv) > 3 else str(Path.home() / "research" / f"{symbol.lower()}-deck.html")
+        
+        import subprocess
+        r1 = subprocess.run(['fin', symbol, 'json'], capture_output=True, text=True)
+        r2 = subprocess.run(['fin', symbol, 'chart'], capture_output=True, text=True)
+        data = json.loads(r1.stdout)
+        charts = json.loads(r2.stdout)
+        data['_charts'] = charts.get('charts',{})
+        
+        # Build minimal spec from fin data
+        price = data.get('currentPrice','---')
+        mc = data.get('marketCap')
+        mcap_str = f"${mc/1e9:.1f}B" if mc else ''
+        name = data.get('longName','') or data.get('shortName',symbol)
+        pe_t = data.get('trailingPE')
+        pe_f = data.get('forwardPE')
+        
+        rev_annual = data['_charts'].get('revenue_annual',{})
+        
+        spec = {
+            "symbol": symbol,
+            "title": f"{name} — Deep Dive Investment Research",
+            "data": data,
+            "slides": [
+                {"type": "title", "symbol": symbol, "name": name, "price": price, "market_cap": mcap_str, "subtitle": "Investment Research & Deep Dive", "meta": f"Forward P/E: {pe_f:.1f}x" if pe_f else ""},
+                {"type": "exec-summary", "bull": "[Add bull case from research]", "bear": "[Add risk considerations from research]", "stats": [{"value": mcap_str, "label": "Market Cap"}, {"value": f"{data.get('revenueGrowth',0)*100:+.0f}%" if data.get('revenueGrowth') else "---", "label": "Rev Growth"}, {"value": f"${data.get('targetMeanPrice',0):.0f}" if data.get('targetMeanPrice') else "---", "label": "Target"}]},
+            ]
+        }
+        
+        if rev_annual.get('labels'):
+            spec["slides"].append({
+                "type": "revenue", "chart_data": rev_annual, "stats": [
+                    {"value": f"${rev_annual['data'][0]}B" if rev_annual['data'] else "", "label": rev_annual['labels'][0] if rev_annual['labels'] else "FY"},
+                    {"value": f"${rev_annual['data'][-1]}B" if rev_annual['data'] else "", "label": rev_annual['labels'][-1] if rev_annual['labels'] else "FY"}
+                ], "highlight": "[Add revenue narrative]"
+            })
+        
+        # Generate placeholder slides for remaining content
+        for i, stype in enumerate(['company','segments','margins','balance','stock','analysts','industry','catalyst','catalyst2','risks','thesis']):
+            if stype == 'revenue':
+                continue
+            spec["slides"].append({"type": stype, "placeholder": True, "_note": f"Replace with real data from research"})
+        
+        html = generate(spec)
+        
+        # Strip placeholder slides
+        import re
+        html = re.sub(r'<div class="slide".*?placeholder.*?</div>\s*</div>', '', html, flags=re.DOTALL)
+        
+        Path(output).write_text(html)
+        print(f"Generated: {output} ({len(html):,} bytes)")
+        print("NOTE: Placeholder slides removed. Fill in research data in spec and re-run.")
+        sys.exit(0)
+    
+    spec_file = sys.argv[1]
+    output_file = sys.argv[2] if len(sys.argv) > 2 else spec_file.replace('.json','.html')
+    
+    spec = json.loads(Path(spec_file).read_text())
+    html = generate(spec)
+    Path(output_file).write_text(html)
+    print(f"Generated: {output_file} ({len(html):,} bytes)")

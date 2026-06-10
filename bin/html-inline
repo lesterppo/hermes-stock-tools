@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""HTML asset inliner — bundles external JS/CSS into self-contained HTML files.
+Usage:
+  html-inline input.html [output.html]     # Inline all CDN assets
+  html-inline input.html -c               # Inline Chart.js only (fast)
+  html-inline --cache                      # Download/cache CDN assets locally
+  html-inline input.html --check           # Report which assets can be inlined
+
+Caches assets in ~/.hermes/cache/ (Chart.js 4.4.1 UMD, Font Awesome 6.5.1)
+"""
+
+import re, sys, os, gzip, hashlib
+from pathlib import Path
+from urllib.request import urlopen, Request
+from urllib.error import URLError
+
+CACHE_DIR = Path.home() / ".hermes" / "cache"
+
+ASSETS = {
+    "chart.js": {
+        "url": "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
+        "file": "chart.umd.min.js",
+        "pattern": r'<script[^>]*src=["\']([^"\']*chart\.(?:umd\.min\.|bundle\.)?js[^"\']*)["\'][^>]*>\s*</script>',
+        "inline": lambda url: f'<script>\n{load_cached("chart.umd.min.js")}\n</script>',
+        "tag": "script",
+    },
+    "fontawesome": {
+        "url": "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
+        "file": "fontawesome.all.min.css",
+        "pattern": r'<link[^>]*href=["\']([^"\']*font-?awesome[^"\']*all\.min\.css[^"\']*)["\'][^>]*/?>',
+        "inline": lambda url: f'<style>\n{load_cached("fontawesome.all.min.css")}\n</style>',
+        "tag": "link",
+    },
+}
+
+def load_cached(name):
+    """Load cached asset, download if needed."""
+    cache_path = CACHE_DIR / name
+    if cache_path.exists():
+        return cache_path.read_text()
+    
+    # Download
+    asset = None
+    for key, a in ASSETS.items():
+        if a["file"] == name:
+            asset = a
+            break
+    if not asset:
+        return f"/* Asset {name} not found */"
+    
+    print(f"  Downloading {asset['url']}...", file=sys.stderr)
+    try:
+        req = Request(asset["url"], headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(req, timeout=15) as resp:
+            data = resp.read()
+            # Handle gzip
+            if resp.headers.get("Content-Encoding") == "gzip":
+                data = gzip.decompress(data)
+            text = data.decode("utf-8", errors="replace")
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(text)
+        return text
+    except Exception as e:
+        print(f"  Failed: {e}", file=sys.stderr)
+        return f"/* Failed to load {name}: {e} */"
+
+def inline_html(input_path, output_path=None, chart_only=False):
+    """Inline all recognized CDN assets into HTML file."""
+    html = Path(input_path).read_text()
+    modified = False
+    
+    assets_to_check = ["chart.js"] if chart_only else ["chart.js", "fontawesome"]
+    
+    for key in assets_to_check:
+        asset = ASSETS[key]
+        pattern = asset["pattern"]
+        matches = list(re.finditer(pattern, html))
+        
+        for match in reversed(matches):  # Process from end to preserve positions
+            full_tag = match.group(0)
+            url = match.group(1)
+            
+            # Load the cached asset
+            content = load_cached(asset["file"])
+            if content.startswith("/* Failed"):
+                print(f"  Skipping {key}: could not load", file=sys.stderr)
+                continue
+            
+            # Build inline replacement
+            if asset["tag"] == "script":
+                replacement = f'<script>\n{content}\n</script>'
+            else:
+                replacement = f'<style>\n{content}\n</style>'
+            
+            html = html[:match.start()] + replacement + html[match.end():]
+            modified = True
+            print(f"  Inlined {key}: {len(content):,} bytes", file=sys.stderr)
+    
+    if not modified:
+        print("  No CDN assets found to inline.", file=sys.stderr)
+    
+    out = output_path or input_path
+    Path(out).write_text(html)
+    size = Path(out).stat().st_size
+    print(f"  Written: {out} ({size:,} bytes)", file=sys.stderr)
+    return modified
+
+def check_html(input_path):
+    """Check which assets can be inlined."""
+    html = Path(input_path).read_text()
+    for key, asset in ASSETS.items():
+        matches = re.findall(asset["pattern"], html)
+        cached = (CACHE_DIR / asset["file"]).exists()
+        status = "cached" if cached else "not cached"
+        if matches:
+            print(f"  {key}: {len(matches)} tag(s) found, {status} ({asset['url']})")
+        else:
+            print(f"  {key}: not found in HTML")
+
+def cmd_cache():
+    """Download and cache all known CDN assets."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    for key, asset in ASSETS.items():
+        path = CACHE_DIR / asset["file"]
+        if path.exists():
+            print(f"  {key}: already cached ({path.stat().st_size:,} bytes)")
+            continue
+        print(f"  {key}: downloading {asset['url']}...")
+        try:
+            req = Request(asset["url"], headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(req, timeout=15) as resp:
+                data = resp.read()
+                if resp.headers.get("Content-Encoding") == "gzip":
+                    data = gzip.decompress(data)
+            path.write_bytes(data)
+            print(f"  {key}: cached ({len(data):,} bytes)")
+        except Exception as e:
+            print(f"  {key}: FAILED — {e}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+    
+    if sys.argv[1] == "--cache":
+        cmd_cache()
+    elif sys.argv[1] == "--check" and len(sys.argv) > 2:
+        check_html(sys.argv[2])
+    elif sys.argv[1] == "--check":
+        print("Usage: html-inline --check input.html")
+    else:
+        input_file = sys.argv[1]
+        output_file = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("-") else None
+        chart_only = "-c" in sys.argv
+        inline_html(input_file, output_file, chart_only)

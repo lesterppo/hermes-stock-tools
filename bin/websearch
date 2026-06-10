@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Reliable web search with auto-fallback.
+Usage: websearch "query" [-n 5] [-j]
+
+Backends (tried in order):
+  1. gemini-search (Google-quality, AI synthesis) — if auth is fresh
+  2. ddgs text (DuckDuckGo, free, no key)
+
+Returns numbered results: title, URL, snippet.
+With -j: JSON output for programmatic use.
+"""
+
+import subprocess, sys, json, os, time
+
+VENV_PYTHON = os.path.expanduser("~/.hermes/hermes-agent/.venv/bin/python3")
+GEMINI_SEARCH = os.path.expanduser("~/.local/bin/gemini-search")
+
+def try_gemini(query, timeout=60):
+    """Try gemini-search, return dict or None on failure."""
+    try:
+        # Search-grounded queries need 30-50s; give 50s to gemini-search
+        result = subprocess.run(
+            [GEMINI_SEARCH, query, "-t", "50"],
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ},
+        )
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout)
+        if "error" in data:
+            return None
+        return data
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        return None
+
+def try_ddgs(query, max_results=5):
+    """Run ddgs text search, return list of {title, url, snippet}."""
+    try:
+        result = subprocess.run(
+            ["ddgs", "text", "-q", query, "-m", str(max_results)],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode != 0:
+            return None
+        
+        # Parse ddgs output: numbered blocks with title/href/body lines
+        # Body can span multiple indented continuation lines
+        results = []
+        current = {}
+        field = None
+        body_lines = []
+        
+        for line in result.stdout.split('\n'):
+            stripped = line.strip()
+            
+            # New result marker: "1." or "2." etc at start of line
+            if stripped and stripped[0].isdigit() and '.' in stripped[:4] and len(stripped) <= 4:
+                # Save previous
+                if current.get('title') and current.get('url'):
+                    current['snippet'] = ' '.join(body_lines)[:500]
+                    results.append(current)
+                current = {}
+                field = None
+                body_lines = []
+                continue
+            
+            # Detect field: "title   ..." or "href    ..." or "body    ..."
+            if stripped.startswith("title "):
+                current['title'] = stripped[5:].strip()
+                field = 'title'
+                body_lines = []
+            elif stripped.startswith("href "):
+                current['url'] = stripped[4:].strip()
+                field = 'href'
+                body_lines = []
+            elif stripped.startswith("body "):
+                body_lines = [stripped[4:].strip()]
+                field = 'body'
+            elif field == 'body' and stripped:
+                body_lines.append(stripped)
+            elif field == 'body' and not stripped:
+                # Empty line ends body
+                field = None
+        
+        # Save last result
+        if current.get('title') and current.get('url'):
+            current['snippet'] = ' '.join(body_lines)[:500]
+            results.append(current)
+        
+        return results if results else None
+    except (subprocess.TimeoutExpired, Exception):
+        return None
+
+def search(query, max_results=5, json_output=False):
+    """Main search: try gemini, fall back to ddgs."""
+    
+    # Try gemini first (80s timeout — search grounding needs 40-55s, plus subprocess overhead)
+    gemini_result = try_gemini(query, timeout=80)
+    if gemini_result and gemini_result.get("r"):
+        if json_output:
+            print(json.dumps(gemini_result, indent=2, ensure_ascii=False))
+        else:
+            print(f"Source: Gemini Search ({len(gemini_result['r'])} results)")
+            for i, r in enumerate(gemini_result["r"], 1):
+                print(f"{i}. {r.get('t','')}")
+                print(f"   {r.get('u','')}")
+                print(f"   {r.get('s','')[:200]}")
+                print()
+            if gemini_result.get("a"):
+                print(f"── AI Synthesis ──")
+                print(gemini_result["a"])
+        return True
+    
+    # Fall back to ddgs
+    ddgs_results = try_ddgs(query, max_results)
+    if ddgs_results:
+        if json_output:
+            print(json.dumps({"source": "ddgs", "results": ddgs_results}, indent=2, ensure_ascii=False))
+        else:
+            print(f"Source: DuckDuckGo ({len(ddgs_results)} results)")
+            for i, r in enumerate(ddgs_results, 1):
+                print(f"{i}. {r['title']}")
+                print(f"   {r['url']}")
+                print(f"   {r['snippet'][:200]}")
+                print()
+        return True
+    
+    # Nothing worked
+    if json_output:
+        print(json.dumps({"error": "All backends failed"}))
+    else:
+        print("Error: All search backends failed (gemini-search, ddgs)", file=sys.stderr)
+    return False
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+    
+    json_mode = "-j" in sys.argv or "--json" in sys.argv
+    max_results = 5
+    for i, arg in enumerate(sys.argv):
+        if arg == "-n" and i+1 < len(sys.argv):
+            max_results = int(sys.argv[i+1])
+    
+    # Extract query (first non-flag argument)
+    query = None
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("-j", "--json"):
+            continue
+        if arg == "-n":
+            skip_next = True
+            continue
+        query = arg
+        break
+    
+    if not query:
+        print("Error: No query provided", file=sys.stderr)
+        sys.exit(1)
+    
+    ok = search(query, max_results, json_mode)
+    sys.exit(0 if ok else 1)

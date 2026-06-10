@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""Financial data CLI — yfinance wrapper, zero manual setup.
+Usage:
+  fin SYMBOL              Full profile (price, valuation, earnings, analysts)
+  fin SYMBOL price         Current price only
+  fin SYMBOL json          All data as JSON
+  fin SYMBOL metrics       Key valuation metrics table
+  fin SYMBOL history 6m    Price history (1m/3m/6m/1y/2y/5y)
+  fin SYMBOL peers         Peer comparison
+
+Requires: yfinance (auto-installed in ~/.hermes/venvs/fin/)
+"""
+
+import sys, json
+from datetime import datetime
+
+# ── Helpers ──
+def fmt(n, prefix="$", suffix="", decimals=2):
+    if n is None: return "N/A"
+    if abs(n) >= 1e12: return f"{prefix}{n/1e12:.{decimals}f}T{suffix}"
+    if abs(n) >= 1e9:  return f"{prefix}{n/1e9:.{decimals}f}B{suffix}"
+    if abs(n) >= 1e6:  return f"{prefix}{n/1e6:.{decimals}f}M{suffix}"
+    return f"{prefix}{n:,.{decimals}f}{suffix}"
+
+def pct(n):
+    if n is None: return "N/A"
+    return f"{n*100:+.1f}%"
+
+# ── Data Fetching ──
+def get_info(symbol):
+    try:
+        import yfinance as yf
+        t = yf.Ticker(symbol)
+        info = t.info
+        if not info or info.get('trailingPegRatio') is None and info.get('currentPrice') is None:
+            # Try fast_info fallback
+            pass
+        return info
+    except Exception as e:
+        return {"_error": str(e)}
+
+def get_history(symbol, period="6mo"):
+    try:
+        import yfinance as yf
+        t = yf.Ticker(symbol)
+        return t.history(period=period)
+    except Exception as e:
+        return None
+
+# ── Output Formats ──
+def profile(symbol):
+    info = get_info(symbol)
+    if "_error" in info:
+        print(f"Error: {info['_error']}")
+        return 1
+    
+    p = info.get('currentPrice') or info.get('regularMarketPrice')
+    name = info.get('longName') or info.get('shortName', symbol)
+    
+    print(f"\n═══ {name} ({symbol}) ═══")
+    print(f"  Price: ${p:.2f}" if p else "  Price: N/A")
+    print(f"  Market Cap: {fmt(info.get('marketCap'))}")
+    print(f"  52-Week: ${info.get('fiftyTwoWeekLow'):.2f} – ${info.get('fiftyTwoWeekHigh'):.2f}" 
+          if info.get('fiftyTwoWeekLow') and info.get('fiftyTwoWeekHigh') else "")
+    print()
+    
+    # Valuation
+    pe_t = info.get('trailingPE')
+    pe_f = info.get('forwardPE')
+    peg = info.get('pegRatio')
+    pb = info.get('priceToBook')
+    ps = info.get('priceToSalesTrailing12Months')
+    ev_ebitda = info.get('enterpriseToEbitda')
+    beta = info.get('beta')
+    
+    print("── Valuation ──")
+    print(f"  Trailing P/E: {pe_t:.1f}x" if pe_t else "")
+    print(f"  Forward P/E:  {pe_f:.1f}x" if pe_f else "")
+    print(f"  PEG Ratio:    {peg:.2f}" if peg else "")
+    print(f"  P/B:          {pb:.2f}x" if pb else "")
+    print(f"  P/S:          {ps:.2f}x" if ps else "")
+    print(f"  EV/EBITDA:    {ev_ebitda:.1f}x" if ev_ebitda else "")
+    print(f"  Beta:         {beta:.2f}" if beta else "")
+    print()
+    
+    # Earnings
+    eps_t = info.get('trailingEps')
+    eps_f = info.get('forwardEps')
+    rev = info.get('totalRevenue')
+    rev_g = info.get('revenueGrowth')
+    margin = info.get('profitMargins')
+    roe = info.get('returnOnEquity')
+    
+    if any([eps_t, eps_f, rev]):
+        print("── Earnings & Profitability ──")
+        print(f"  EPS (TTM):    ${eps_t:.2f}" if eps_t else "")
+        print(f"  EPS (Fwd):    ${eps_f:.2f}" if eps_f else "")
+        print(f"  Revenue:      {fmt(rev)}" if rev else "")
+        print(f"  Rev Growth:   {pct(rev_g)}" if rev_g is not None else "")
+        print(f"  Profit Margin:{pct(margin)}" if margin is not None else "")
+        print(f"  ROE:          {pct(roe)}" if roe is not None else "")
+        print()
+    
+    # Balance Sheet
+    de = info.get('debtToEquity')
+    cr = info.get('currentRatio')
+    if de or cr:
+        print("── Balance Sheet ──")
+        print(f"  Debt/Equity:  {de:.1f}%" if de else "")
+        print(f"  Current Ratio:{cr:.2f}" if cr else "")
+        print()
+    
+    # Analysts
+    target = info.get('targetMeanPrice')
+    rec = info.get('recommendationKey')
+    na = info.get('numberOfAnalystOpinions')
+    print("── Analyst Consensus ──")
+    print(f"  Rating:       {rec or 'N/A'}")
+    print(f"  # Analysts:   {na or 'N/A'}")
+    print(f"  Target Mean:  ${target:.2f}" if target else "  Target: N/A")
+    print(f"  Target Range: ${info.get('targetLowPrice'):.0f} – ${info.get('targetHighPrice'):.0f}" 
+          if info.get('targetLowPrice') and info.get('targetHighPrice') else "")
+    if target and p:
+        upside = (target - p) / p * 100
+        print(f"  Upside:       {upside:+.1f}%")
+    print()
+    
+    return 0
+
+def output_json(symbol):
+    info = get_info(symbol)
+    if "_error" in info:
+        print(json.dumps(info))
+        return 1
+    
+    # Select relevant keys
+    keys = [
+        'symbol','longName','shortName','currentPrice','marketCap',
+        'trailingPE','forwardPE','pegRatio','priceToBook','priceToSalesTrailing12Months',
+        'enterpriseToEbitda','beta','trailingEps','forwardEps',
+        'totalRevenue','revenueGrowth','profitMargins','returnOnEquity',
+        'debtToEquity','currentRatio','targetMeanPrice','targetHighPrice',
+        'targetLowPrice','recommendationKey','numberOfAnalystOpinions',
+        'fiftyTwoWeekHigh','fiftyTwoWeekLow','dividendYield'
+    ]
+    out = {k: info.get(k) for k in keys if k in info}
+    # Rename for consistency
+    out['symbol'] = symbol
+    print(json.dumps(out, indent=2, default=str))
+    return 0
+
+def output_history(symbol, period="6mo"):
+    h = get_history(symbol, period)
+    if h is None or h.empty:
+        print(f"No history for {symbol}")
+        return 1
+    print(f"── {symbol} Price History ({period}) ──")
+    for date, row in h.iterrows():
+        print(f"  {date.strftime('%Y-%m-%d')}: Open ${row['Open']:.2f} | Close ${row['Close']:.2f} | Vol {row['Volume']:,.0f}")
+    print(f"\n  Period: {h.index[0].strftime('%b %d %Y')} → {h.index[-1].strftime('%b %d %Y')}")
+    lc = h['Close'].iloc[-1]
+    fc = h['Close'].iloc[0]
+    chg = (lc - fc) / fc * 100 if fc else 0
+    print(f"  Change: {chg:+.1f}%")
+    return 0
+
+def output_chart(symbol):
+    """Output Chart.js-ready JSON with quarterly revenue and EPS data."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(symbol)
+        info = t.info
+        qf = t.quarterly_financials  # columns = quarters (newest first)
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        return 1
+
+    name = info.get('longName') or info.get('shortName', symbol)
+    price = info.get('currentPrice') or info.get('regularMarketPrice')
+
+    # Revenue from quarterly financials (Total Revenue)
+    rev_data = []
+    rev_labels = []
+    if qf is not None and not qf.empty:
+        if 'Total Revenue' in qf.index:
+            rev_series = qf.loc['Total Revenue']
+        elif 'Revenue' in qf.index:
+            rev_series = qf.loc['Revenue']
+        else:
+            rev_series = None
+
+        if rev_series is not None:
+            for date, val in sorted(rev_series.items()):
+                if val and val > 0:
+                    rev_data.append(round(val / 1e6, 1))  # Convert to millions
+                    rev_labels.append(date.strftime('%Y-%m-%d'))
+
+    # EPS from quarterly financials (Diluted EPS)
+    eps_data = []
+    eps_labels = []
+    if qf is not None and not qf.empty:
+        eps_series = None
+        for candidate in ['Diluted EPS', 'Basic EPS', 'Net Income']:
+            if candidate in qf.index:
+                eps_series = qf.loc[candidate]
+                break
+        if eps_series is not None:
+            # If Net Income, divide by shares outstanding
+            if 'Net Income' in qf.index and candidate == 'Net Income':
+                shares = info.get('sharesOutstanding') or 1e9
+                for date, val in sorted(eps_series.items()):
+                    if val:
+                        eps_data.append(round(val / shares, 2))
+                        eps_labels.append(date.strftime('%Y-%m-%d'))
+            else:
+                for date, val in sorted(eps_series.items()):
+                    if val and val > 0:
+                        eps_data.append(round(val, 2))
+                        eps_labels.append(date.strftime('%Y-%m-%d'))
+
+    # Build Chart.js-ready output
+    result = {
+        "symbol": symbol,
+        "name": name,
+        "price": price,
+        "charts": {}
+    }
+
+    if rev_labels and rev_data:
+        result["charts"]["revenue"] = {
+            "labels": rev_labels,
+            "data": rev_data,
+            "unit": "M",
+            "label": "Revenue ($M)",
+            "suggestion": "bar"
+        }
+
+    if eps_labels and eps_data:
+        result["charts"]["eps"] = {
+            "labels": eps_labels,
+            "data": eps_data,
+            "unit": "$",
+            "label": "EPS ($)",
+            "suggestion": "bar"
+        }
+
+    # Annual revenue trend (for overview charts)
+    try:
+        af = t.financials  # annual
+        annual_labels = []
+        annual_rev = []
+        if af is not None and not af.empty:
+            for candidate in ['Total Revenue', 'Revenue']:
+                if candidate in af.index:
+                    for date, val in sorted(af.loc[candidate].items()):
+                        if val and val > 0:
+                            annual_rev.append(round(val / 1e9, 2))
+                            annual_labels.append(str(date.year))
+                    break
+        if annual_labels and annual_rev:
+            result["charts"]["revenue_annual"] = {
+                "labels": annual_labels,
+                "data": annual_rev,
+                "unit": "B",
+                "label": "Annual Revenue ($B)",
+                "suggestion": "bar"
+            }
+    except Exception:
+        pass
+
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+# ── Main ──
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+    
+    symbol = sys.argv[1].upper()
+    cmd = sys.argv[2] if len(sys.argv) > 2 else "profile"
+    
+    if cmd == "profile":
+        sys.exit(profile(symbol))
+    elif cmd == "json":
+        sys.exit(output_json(symbol))
+    elif cmd == "price":
+        info = get_info(symbol)
+        p = info.get('currentPrice') or info.get('regularMarketPrice')
+        print(f"{symbol}: ${p:.2f}" if p else "N/A")
+    elif cmd == "history":
+        period = sys.argv[3] if len(sys.argv) > 3 else "6mo"
+        sys.exit(output_history(symbol, period))
+    elif cmd == "chart":
+        sys.exit(output_chart(symbol))
+    elif cmd == "metrics":
+        profile(symbol)
+    else:
+        profile(symbol)

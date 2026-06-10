@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""stock-data — Collect all data needed for a stock research deck in one shot.
+Usage: stock-data SYMBOL
+
+Output: JSON with financials + web search results + chart data.
+Feeds directly into LLM synthesis → deck-gen spec → deck-deliver.
+Replaces 6×20=120 subagent web searches with 5 targeted queries.
+"""
+
+import json, sys, subprocess, os
+from datetime import datetime
+
+FIN = os.path.expanduser("~/.local/bin/fin")
+WEBSEARCH = os.path.expanduser("~/.local/bin/websearch")
+DDGS = "ddgs"
+
+def run(cmd, timeout=80):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except Exception:
+        return None
+
+def query_ddgs(q, n=5):
+    """Fast ddgs search (2-5s, no API key)"""
+    out = run([DDGS, "text", "-q", q, "-m", str(n)], timeout=15)
+    if not out:
+        return []
+    results = []
+    current, field, body_lines = {}, None, []
+    for line in out.split('\n'):
+        s = line.strip()
+        if s and s[0].isdigit() and '.' in s[:4] and len(s) <= 4:
+            if current.get('title') and current.get('url'):
+                current['snippet'] = ' '.join(body_lines)[:300]
+                results.append(current)
+            current, field, body_lines = {}, None, []
+            continue
+        if s.startswith("title "): current['title'] = s[5:].strip(); field = 'title'; body_lines = []
+        elif s.startswith("href "): current['url'] = s[4:].strip(); field = 'href'
+        elif s.startswith("body "): body_lines = [s[4:].strip()]; field = 'body'
+        elif field == 'body' and s: body_lines.append(s)
+        elif field == 'body' and not s: field = None
+    if current.get('title') and current.get('url'):
+        current['snippet'] = ' '.join(body_lines)[:300]
+        results.append(current)
+    return results
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: stock-data SYMBOL", file=sys.stderr)
+        sys.exit(1)
+    
+    symbol = sys.argv[1].upper()
+    
+    # 1. Financial data (instant)
+    fin_json_raw = run([FIN, symbol, "json"], timeout=10)
+    fin_chart_raw = run([FIN, symbol, "chart"], timeout=15)
+    
+    fin_data = json.loads(fin_json_raw) if fin_json_raw else {}
+    chart_data = json.loads(fin_chart_raw) if fin_chart_raw else {}
+    
+    name = fin_data.get('longName') or fin_data.get('shortName') or symbol
+    
+    # 2. Targeted web searches (5 queries, ~10-15s total with ddgs)
+    queries = [
+        ("overview", f"{name} company business segments products end markets"),
+        ("financials", f"{symbol} {name} quarterly earnings revenue growth margins 2025 2026"),
+        ("catalysts", f"{name} growth catalysts AI data center 5G defense semiconductor 2026"),
+        ("competitive", f"{name} competitors market share industry position moat"),
+        ("news", f"{symbol} {name} latest news developments acquisitions 2026"),
+    ]
+    
+    search_results = {}
+    for key, query in queries:
+        results = query_ddgs(query, n=4)
+        search_results[key] = results
+    
+    # 3. Build aggregated output
+    output = {
+        "symbol": symbol,
+        "name": name,
+        "generated": datetime.now().isoformat(),
+        "financials": fin_data,
+        "charts": chart_data.get("charts", {}),
+        "search": search_results,
+        "_hint": "Feed this to the LLM to synthesize into a deck-gen spec. "
+                 "Then run: deck-deliver spec.json output.html"
+    }
+    
+    print(json.dumps(output, indent=2, default=str))
+
+if __name__ == "__main__":
+    main()
