@@ -353,7 +353,6 @@ def generate(spec):
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{h(spec.get('title',spec.get('symbol','Stock')+' — Deep Dive Investment Research'))}</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>{DARK_THEME_CSS}</style>
 </head>
 <body>
@@ -367,6 +366,7 @@ def generate(spec):
   <button onclick="nextSlide()">Next</button>
 </div>
 {nav_js}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </body>
 </html>"""
 
