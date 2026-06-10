@@ -65,10 +65,10 @@ tr:hover td{background:rgba(56,189,248,0.04);color:var(--text)}
 
 JS_NAV = """<script>
 var cs=0,ts=__SLIDE_COUNT__,els=null,ctr=null,pd=null,ci={};
-function goTo(n){if(!els)return;els[cs].classList.remove('active');cs=n;els[cs].classList.add('active');if(ctr)ctr.textContent='Slide '+(cs+1)+' / '+ts;updateDots();renderCharts(cs);}
+function goTo(n){els[cs].classList.remove('active');cs=n;els[cs].classList.add('active');if(ctr)ctr.textContent='Slide '+(cs+1)+' / '+ts;updateDots();renderCharts(cs);}
 window.prevSlide=function(){goTo((cs-1+ts)%ts);};window.nextSlide=function(){goTo((cs+1)%ts);};
-function buildDots(){pd=document.getElementById('progressDots');if(!pd)return;pd.innerHTML='';for(var i=0;i<ts;i++){var d=document.createElement('button');d.className='dot'+(i===0?' active':'');d.setAttribute('aria-label','Go to slide '+(i+1));d.onclick=(function(idx){return function(){goTo(idx);};})(i);pd.appendChild(d);}}
-function updateDots(){if(!pd)return;var dots=pd.querySelectorAll('.dot');for(var i=0;i<dots.length;i++)dots[i].className='dot'+(i===cs?' active':'');}
+function buildDots(){pd=document.getElementById('progressDots');pd.innerHTML='';for(var i=0;i<ts;i++){var d=document.createElement('button');d.className='dot'+(i===0?' active':'');d.setAttribute('aria-label','Go to slide '+(i+1));d.onclick=(function(idx){return function(){goTo(idx);};})(i);pd.appendChild(d);}}
+function updateDots(){var dots=pd.querySelectorAll('.dot');for(var i=0;i<dots.length;i++)dots[i].className='dot'+(i===cs?' active':'');}
 document.addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '){e.preventDefault();window.nextSlide();}else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();window.prevSlide();}});
 var tx=0;document.addEventListener('touchstart',function(e){tx=e.changedTouches[0].screenX;},{passive:true});document.addEventListener('touchend',function(e){var dx=e.changedTouches[0].screenX-tx;if(Math.abs(dx)>50){if(dx<0)window.nextSlide();else window.prevSlide();}},{passive:true});
 function renderCharts(si){__CHART_TRIGGERS__}
@@ -161,7 +161,7 @@ def render_revenue(spec, data):
     bg_colors = json.dumps(chart_data.get('colors',['rgba(56,189,248,0.5)' for _ in chart_data.get('data',[])]))
     
     chart_trigger = f"if(si===4)tryDraw('rev','{chart_id}',{chart_fn});"
-    chart_func = f"function {chart_fn}(c){{return new Chart(c,{{type:'bar',data:{{labels:{labels},datasets:[{{label:'Revenue (${unit})',data:{values},backgroundColor:{bg_colors},borderColor:'#38bdf8',borderWidth:1,borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{grid:{{color:'rgba(148,163,184,0.1)'}},ticks:{{color:'#94a3b8',callback:function(v){{return '$'+v+'{unit}'}}}}}},x:{{ticks:{{color:'#94a3b8'}}}}}}}});}}"
+    chart_func = f"function {chart_fn}(c){{return new Chart(c,{{type:'bar',data:{{labels:{labels},datasets:[{{label:'Revenue (${unit})',data:{values},backgroundColor:{bg_colors},borderColor:'#38bdf8',borderWidth:1,borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{grid:{{color:'rgba(148,163,184,0.1)'}},ticks:{{color:'#94a3b8',callback:function(v){{return '$'+v+'{unit}'}}}}}},x:{{ticks:{{color:'#94a3b8'}}}}}}}}}});}}"
     
     return {
         'html': f"""<div class="slide" data-index="4">
@@ -191,7 +191,7 @@ def render_margins(spec, data):
     bg_colors = json.dumps(eps_data.get('colors',['rgba(56,189,248,0.6)' for _ in eps_data.get('data',[])]))
     
     chart_trigger = f"if(si===5)tryDraw('eps','{chart_id}',{chart_fn});"
-    chart_func = f"function {chart_fn}(c){{return new Chart(c,{{type:'bar',data:{{labels:{labels},datasets:[{{label:'EPS',data:{values},backgroundColor:{bg_colors},borderColor:'#38bdf8',borderWidth:1,borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{grid:{{color:'rgba(148,163,184,0.1)'}},ticks:{{color:'#94a3b8',callback:function(v){{return '$'+v}}}}}},x:{{ticks:{{color:'#94a3b8'}}}}}}}});}}"
+    chart_func = f"function {chart_fn}(c){{return new Chart(c,{{type:'bar',data:{{labels:{labels},datasets:[{{label:'EPS',data:{values},backgroundColor:{bg_colors},borderColor:'#38bdf8',borderWidth:1,borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}},scales:{{y:{{grid:{{color:'rgba(148,163,184,0.1)'}},ticks:{{color:'#94a3b8',callback:function(v){{return '$'+v}}}}}},x:{{ticks:{{color:'#94a3b8'}}}}}}}}}});}}"
     
     return {
         'html': f"""<div class="slide" data-index="5">
