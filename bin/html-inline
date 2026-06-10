@@ -86,11 +86,13 @@ def inline_html(input_path, output_path=None, chart_only=False):
                 print(f"  Skipping {key}: could not load", file=sys.stderr)
                 continue
             
-            # Build inline replacement
+            # Build inline replacement — escape </script> in JS content
             if asset["tag"] == "script":
-                replacement = f'<script>\n{content}\n</script>'
+                safe_content = content.replace('</', '<\\/')
+                replacement = f'<script>\n{safe_content}\n</script>'
             else:
-                replacement = f'<style>\n{content}\n</style>'
+                safe_content = content.replace('</', '<\\/')
+                replacement = f'<style>\n{safe_content}\n</style>'
             
             html = html[:match.start()] + replacement + html[match.end():]
             modified = True

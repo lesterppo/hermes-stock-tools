@@ -352,6 +352,8 @@ def generate(spec):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{h(spec.get('title',spec.get('symbol','Stock')+' — Deep Dive Investment Research'))}</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>{DARK_THEME_CSS}</style>
 </head>
 <body>
@@ -403,7 +405,7 @@ if __name__ == "__main__":
     if sys.argv[1] == "--from-fin":
         # Auto-generate from fin data
         symbol = sys.argv[2]
-        output = sys.argv[3] if len(sys.argv) > 3 else str(Path.home() / "research" / f"{symbol.lower()}-deck.html")
+        output = sys.argv[3] if len(sys.argv) > 3 else f"/home/peter/research/{symbol.lower()}-deck.html"
         
         import subprocess
         r1 = subprocess.run(['fin', symbol, 'json'], capture_output=True, text=True)
